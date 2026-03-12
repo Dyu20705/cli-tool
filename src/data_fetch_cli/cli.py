@@ -1,45 +1,84 @@
-#Lợi ích của typer:Mạnh cho xây CLI nhanh chóng
-import typer
-from data_fetch_cli.downloader import download_data
-from data_fetch_cli.validator import validate_url
-from logger import get_logger
+import json
+from importlib.metadata import PackageNotFoundError, version
 
-#Đại diện cho ứng dụng CLI
-#App quản lý các command và tham số của chương trình
+import requests
+import typer
+from pydantic import ValidationError
+
+from data_fetch_cli.downloader import download_data
+from data_fetch_cli.logger import get_logger
+from data_fetch_cli.validator import validate_user
+
 app = typer.Typer()
 logger = get_logger()
 
-#Định nghĩa callback chính cho ứng dụng CLI
-#Callback này sẽ được gọi
-#khi người dùng chạy ứng dụng mà không chỉ định lệnh cụ thể nào
+
+def get_package_version() -> str:
+    try:
+        return version("data-fetch-cli")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def version_callback(value: bool) -> None:
+    if not value:
+        return
+    typer.echo(get_package_version())
+    raise typer.Exit()
+
+
+def exit_with_error(message: str) -> None:
+    typer.secho(message, fg=typer.colors.RED, err=True)
+    raise typer.Exit(code=1)
+
 @app.callback()
-def main() -> None:
-    """Entry point cho CLI group."""
+def main(
+    version_option: bool = typer.Option(
+        False,
+        "--version",
+        help="Show the installed CLI version and exit.",
+        callback=version_callback,
+        is_eager=True,
+    ),
+) -> None:
+    """Data fetch CLI."""
     return None
 
-# @app.command() Đăng ký hàm thành lệnh
-#decorator @app.command() cho hàm bên dưới
-#báo cho typer biết fetch là lệnh trong CLI
-#Khi người dùng chạy script với tham số dòng lệnh
-#Typer sẽ dựa vào các decorator này để xác định lệnh nào được gọi và ánh xạ tham số.
-
-#Hàm chứa logic xử lý lệnh fetch
-#Hint "str" cho tham số url giúp typer hiểu rằng url là một chuỗi
 @app.command()
-def fetch(url: str = typer.Argument(..., help="URL để lấy dữ liệu")):
-    # logger.info(f"download_started, extra = {{'url': '{url}'}}") #Ghi log thông tin về việc tải và xác thực dữ liệu thành công
-    
-    data = download_data(url) #Gọi hàm download_data với URL được cung cấp từ dòng lệnh
+def fetch(
+    url: str = typer.Argument(..., help="URL để lấy dữ liệu"),
+    json_output: bool = typer.Option(
+        False,
+        "--json",
+        help="Emit validated records as JSON for scripting and pipelines.",
+    ),
+) -> None:
+    logger.info("download_started", extra={"url": url})
 
-    # logger.info(f"download_completed, extra = {{'record': {len(data)}}}") #Ghi log thông tin về việc tải và xác thực dữ liệu thành công
-    
-    users = validate_url(data) #Gọi hàm validate_url để kiểm tra tính hợp lệ của data đã tải về
-    
-    # logger.info(f"validation_completed, extra = {{'valid_users': {len(users)}}}") #Ghi log thông tin về việc tải và xác thực dữ liệu thành công
+    try:
+        data = download_data(url)
+    except requests.RequestException as exc:
+        logger.error("download_failed", extra={"url": url, "error": str(exc)})
+        exit_with_error(f"Request failed: {exc}")
 
-    print(users) #In dữ liệu đã tải về, có thể là nội dung của URL hoặc thông tin liên quan tùy thuộc vào cách download_data được triển khai
+    logger.info("download_completed", extra={"record_count": len(data)})
+
+    try:
+        users = validate_user(data)
+    except (ValidationError, TypeError, ValueError) as exc:
+        logger.error("validation_failed", extra={"url": url, "error": str(exc)})
+        exit_with_error(f"Validation failed: {exc}")
+
+    logger.info("validation_completed", extra={"valid_user_count": len(users)})
+
+    if json_output:
+        typer.echo(json.dumps([user.model_dump() for user in users], ensure_ascii=False))
+        return
+
+    for user in users:
+        typer.echo(f"{user.id}: {user.name} <{user.email}>")
 
 if __name__ == "__main__":
-    app() #Khởi chạy ứng dụng CLI, cho phép người dùng tương tác với các lệnh đã định nghĩa
+    app()
 
 

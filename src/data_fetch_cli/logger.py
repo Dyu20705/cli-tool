@@ -1,15 +1,18 @@
-# import logging
-# from pythonjsonlogger import jsonlogger
+import logging
+from pythonjsonlogger.json import JsonFormatter
 
-# def get_logger():
-#     logger = logging.getLogger("app") #Tạo một logger với tên "app"
-#     logger.setLevel(logging.INFO) #Đặt mức độ log là INFO, có nghĩa là sẽ ghi lại các thông tin quan trọng và các sự kiện bình thường
+def get_logger():
+    logger = logging.getLogger("app")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
-#     handler = logging.StreamHandler() #Tạo một handler để ghi log ra console
-    
-#     formatter = jsonlogger.JsonFormatter() #Tạo một formatter để định dạng log dưới dạng JSON
-#     handler.setFormatter(formatter) #Gán formatter cho handler
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = JsonFormatter(
+            fmt="%(asctime)s %(levelname)s %(message)s %(module)s",
+            rename_fields={"asctime": "timestamp", "levelname": "level"},
+        )
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
 
-#     logger.addHandler(handler) #Gán handler cho logger
-
-#     return logger
+    return logger
